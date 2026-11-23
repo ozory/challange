@@ -2,6 +2,7 @@ import json
 import os
 import asyncio
 import logging
+import ssl
 from typing import Optional
 import httpx
 from schemas import (
@@ -14,6 +15,28 @@ from schemas import (
 from sanitizer import sanitizar_resumo
 
 logger = logging.getLogger("finguard")
+
+
+def _criar_contexto_ssl():
+    """
+    Define em quem o httpx confia ao validar o HTTPS.
+
+    Redes corporativas costumam reassinar o tráfego com uma CA própria, instalada no
+    repositório de certificados do sistema mas ausente do `certifi` (usado por padrão).
+    Ordem de preferência:
+      1. LLM_CA_BUNDLE=<caminho .pem>  -> bundle de CA explícito
+      2. truststore                    -> repositório de certificados do SO (Windows/macOS)
+      3. padrão do httpx (certifi)
+    """
+    ca_bundle = os.getenv("LLM_CA_BUNDLE")
+    if ca_bundle:
+        return ssl.create_default_context(cafile=ca_bundle)
+    try:
+        import truststore
+        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    except ImportError:
+        logger.warning("[LLM] 'truststore' não instalado; usando certificados do certifi")
+        return True
 
 
 class LLMService:
@@ -128,7 +151,7 @@ Texto da reclamação para análise:
             "response_format": {"type": "json_object"},
         }
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, verify=_criar_contexto_ssl()) as client:
             response = await client.post(
                 f"{self.base_url}/chat/completions", headers=headers, json=payload
             )

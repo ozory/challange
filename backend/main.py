@@ -244,10 +244,10 @@ async def limpar_reclamacoes():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Serve o frontend em JavaScript puro (../frontjs) em http://localhost:8000/app/
-FRONTJS_DIR = Path(__file__).resolve().parent.parent / "frontjs"
-if FRONTJS_DIR.is_dir():
-    app.mount("/app", StaticFiles(directory=FRONTJS_DIR, html=True), name="frontjs")
+# Serve o frontend em JavaScript puro (../frontend) em http://localhost:8000/app/
+FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+if FRONTEND_DIR.is_dir():
+    app.mount("/app", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
 
 
 if __name__ == "__main__":

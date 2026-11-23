@@ -271,7 +271,7 @@ textarea.input { resize: none; }
 /* ---------- Dashboard ---------- */
 .dash { display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 1.5rem; background: var(--color-bg-primary); overflow-y: auto; }
 .dash-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
-.kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
 .chart-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.5rem; margin-bottom: 1.5rem; }
 .card {
   background: var(--color-bg-secondary); border-radius: var(--radius-xl); padding: 1.25rem;
@@ -279,10 +279,13 @@ textarea.input { resize: none; }
 }
 .card-hover { transition: transform var(--transition-fast), box-shadow var(--transition-fast); }
 .card-hover:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
-.kpi { display: flex; align-items: flex-start; justify-content: space-between; }
-.kpi-label { font-size: 0.75rem; font-weight: 500; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
-.kpi-value { font-size: 1.875rem; font-weight: 700; }
-.kpi-icon { padding: 0.75rem; border-radius: var(--radius-xl); }
+.kpi { height: 100%; display: flex; align-items: stretch; justify-content: space-between; gap: 0.5rem; }
+.kpi > div:first-child { min-width: 0; display: flex; flex-direction: column; justify-content: space-between; }
+.kpi-label, .kpi-value { margin: 0; }
+.kpi-icon { align-self: flex-start; }
+.kpi-label { font-size: 0.6875rem; font-weight: 500; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.25rem; line-height: 1.3; }
+.kpi-value { font-size: 1.7em; font-weight: 700; }
+.kpi-icon { flex-shrink: 0; padding: 0.5rem; border-radius: var(--radius-xl); }
 .kpi-icon.blue { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
 .kpi-icon.purple { background: rgba(168, 85, 247, 0.1); color: #a855f7; }
 .kpi-icon.red { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
