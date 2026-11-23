@@ -1,6 +1,8 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 from pydantic import BaseModel
 from typing import List, Optional
 import asyncio
@@ -240,6 +242,12 @@ async def limpar_reclamacoes():
         return {"success": True, "message": "Todas as reclamações foram removidas"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# Serve o frontend em JavaScript puro (../frontjs) em http://localhost:8000/app/
+FRONTJS_DIR = Path(__file__).resolve().parent.parent / "frontjs"
+if FRONTJS_DIR.is_dir():
+    app.mount("/app", StaticFiles(directory=FRONTJS_DIR, html=True), name="frontjs")
 
 
 if __name__ == "__main__":
