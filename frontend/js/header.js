@@ -96,7 +96,7 @@
         el('div', { class: 'header-actions' },
           fileInput, uploadBtn,
           el('div', { class: 'export-group' }, exportBtns),
-          refreshBtn, clearBtn,
+          refreshBtn, //clearBtn,
           el('div', { class: 'divider-v' }),
           themeBtn)));
   }
