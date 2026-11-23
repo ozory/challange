@@ -1,0 +1,6 @@
+pyproject.toml
+finguard_backend.egg-info/PKG-INFO
+finguard_backend.egg-info/SOURCES.txt
+finguard_backend.egg-info/dependency_links.txt
+finguard_backend.egg-info/requires.txt
+finguard_backend.egg-info/top_level.txt

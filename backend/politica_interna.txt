@@ -1,0 +1,42 @@
+POLÍTICA INTERNA DE ATENDIMENTO - FinGuard
+
+1. CLASSIFICAÇÃO DE CATEGORIAS:
+- Cobrança Indevida: Valores cobrados incorretamente, taxas não informadas, juros errados, anuidade indevida
+- Atendimento: Demora, transferências excessivas, atendentes despreparados, canais não funcionais
+- Fraude/Segurança: Transações não autorizadas, acesso indevido à conta, vazamento de dados, golpes
+- Produto/Serviço: Falhas no app, Pix não funciona, seguro não cobre o prometido, investimento com taxas ocultas
+- Cancelamento: Dificuldade para cancelar produtos, cancelamento não efetivado, cobrança após cancelamento
+- Outros: Casos que não se encaixam nas categorias acima
+
+2. CLASSIFICAÇÃO DE PRODUTOS:
+- Cartão de Crédito: Anuidade, fatura, limite, transações, cancelamento de cartão
+- Conta Corrente: Tarifas, Pix, transferências, saldo, extrato, pacote de serviços
+- Empréstimo: Taxas de juros, parcelas, contratação, quitação, renegociação
+- Investimentos: Fundos, taxas de performance, rentabilidade, resgate, assessoria
+- Seguros: Cobertura, sinistro, reajuste, apólice, cancelamento, beneficiários
+- Não Identificado: Quando o produto não é mencionado ou não é claro
+
+3. CLASSIFICAÇÃO DE SENTIMENTO:
+- Positivo: Elogio, satisfação, agradecimento, problema resolvido
+- Neutro: Informação factual, dúvida, solicitação sem carga emocional
+- Negativo: Reclamação, insatisfação, frustração, problema não resolvido
+- Crítico: Desespero, urgência extrema, ameaça judicial, risco financeiro grave, linguagem muito agressiva
+
+4. CLASSIFICAÇÃO DE URGÊNCIA:
+- Baixa: Dúvida, sugestão, elogio, solicitação sem prazo
+- Média: Reclamação padrão, problema funcional, solicitação de correção
+- Alta: Problema financeiro significativo, risco de negativação, prazo regulatório
+- Crítica: Fraude ativa, desespero financeiro, ameaça judicial iminente, vida em risco
+
+5. REGRAS DE RESUMO:
+- Máximo 2-3 linhas
+- Linguagem formal e padronizada
+- NUNCA incluir palavras impróprias ou ofensivas
+- Focar no problema principal e impacto no cliente
+- Não incluir dados sensíveis (CPF, conta, telefone)
+
+6. DIRETRIZES ESPECIAIS:
+- Fraude/Segurança + Urgência Crítica = Prioridade máxima
+- Cancelamento + Cobrança indevida após cancelamento = Urgência Alta
+- Idoso/PCd + Dificuldade de acesso = Urgência Alta
+- Múltiplos canais sem resolução = Urgência Alta
