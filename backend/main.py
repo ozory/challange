@@ -11,11 +11,21 @@ from datetime import datetime
 import pandas as pd
 import io
 import logging
+import os
 import sys
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
-# Carregar variáveis de ambiente do .env
-load_dotenv()
+BACKEND_DIR = Path(__file__).resolve().parent
+load_dotenv(BACKEND_DIR / ".env")
+arquivo_compartilhado = os.getenv("STACKSPOT_ENV_FILE", "").strip()
+if arquivo_compartilhado:
+    caminho = Path(arquivo_compartilhado).expanduser()
+    if not caminho.is_absolute():
+        caminho = BACKEND_DIR / caminho
+    valores = dotenv_values(caminho)
+    for nome in ("STACKSPOT_REALM", "STACKSPOT_CLIENT_ID", "STACKSPOT_CLIENT_SECRET", "STACKSPOT_AGENT_URL"):
+        if not os.environ.get(nome) and valores.get(nome):
+            os.environ[nome] = valores[nome]
 
 # Configurar logging com data/hora local
 logging.basicConfig(

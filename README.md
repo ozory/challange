@@ -6,7 +6,7 @@
 
 ## 📋 Visão Geral
 
-O **FinGuard** é uma aplicação web full-stack que recebe reclamações em texto livre (via chatbot individual ou importação em lote via CSV) e utiliza um Provedor de LLM com RAG local para classificar, resumir e priorizar os atendimentos, alimentando dinamicamente um Dashboard gerencial.
+O **FinGuard** é uma aplicação web full-stack que recebe reclamações em texto livre (via chatbot individual ou importação em lote via CSV) e utiliza a StackSpot AI com a política interna local como contexto para classificar, resumir e priorizar os atendimentos, alimentando dinamicamente um Dashboard gerencial.
 
 ### ✨ Funcionalidades Principais
 
@@ -16,7 +16,7 @@ O **FinGuard** é uma aplicação web full-stack que recebe reclamações em tex
 | 📊 **Processamento em Lote (CSV)** | Suporta dataset de ~500 reclamações com concorrência controlada |
 | 🛡️ **Ofuscação de Palavras Impróprias** | Remove/sanitiza termos ofensivos no campo `resumo` |
 | 📤 **Exportação Múltipla** | JSON, CSV e HTML consolidado com gráficos Chart.js |
-| 🏠 **100% Local** | Sem dependência de nuvem - SQLite local, processamento local |
+| 🏠 **Persistência local** | SQLite e arquivos de exportação permanecem locais; a inferência usa a API StackSpot |
 
 ---
 
@@ -33,7 +33,7 @@ O **FinGuard** é uma aplicação web full-stack que recebe reclamações em tex
 | **SQLite** | Built-in | Persistência local |
 | **httpx** | 0.26.0 | Cliente HTTP assíncrono para LLM |
 | **python-dotenv** | 1.0.0 | Variáveis de ambiente |
-| **OpenRouter API** | - | Integração LLM (modelo gratuito) |
+| **StackSpot AI** | REST | Agente de classificação e Knowledge Source |
 
 ### Frontend
 | Tecnologia | Versão | Uso |
@@ -60,7 +60,7 @@ challange/
 ├── backend/
 │   ├── main.py               # Entrada FastAPI, rotas HTTP, CORS
 │   ├── schemas.py            # Modelos Pydantic e Enums
-│   ├── llm_service.py        # Integração LLM + RAG (política interna)
+│   ├── llm_service.py        # StackSpot REST + contexto da política interna
 │   ├── sanitizer.py          # Filtro de palavras impróprias
 │   ├── repository.py         # Camada SQLite (thread-safe)
 │   ├── exporter.py           # Gerador de relatórios (JSON/CSV/HTML)
@@ -126,17 +126,25 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 > - Documentação ReDoc: `http://localhost:8000/redoc`
 
 #### Variáveis de Ambiente (Backend)
-Crie um arquivo `.env` na pasta `backend/`:
+Crie um arquivo `.env` na pasta `backend/` com as credenciais do agente autorizado:
 ```env
-# OpenRouter API Key (obrigatório para LLM real)
-# Obtenha em: https://openrouter.ai/keys
-OPEN_ROUTER_KEY=sua_chave_aqui
-
-# Opcional: Modelo específico (padrão: nvidia/nemotron-3-ultra-550b-a55b:free)
-# OPEN_ROUTER_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
+STACKSPOT_REALM=seu_realm
+STACKSPOT_CLIENT_ID=seu_client_id
+STACKSPOT_CLIENT_SECRET=seu_client_secret
+STACKSPOT_AGENT_URL=https://genai-inference-app.stackspot.com/v1/agent/SEU_AGENT_ID/chat
 ```
 
-> **Sem API Key:** O sistema usa classificação **mock** baseada em palavras-chave (funciona offline para desenvolvimento/testes).
+Na mesma máquina com o projeto `finguard-nivel1`, é possível reutilizar sua configuração sem copiar o segredo:
+
+```env
+STACKSPOT_ENV_FILE=../../finguard-nivel1/.env
+```
+
+O caminho é relativo à pasta `backend/`; valores preenchidos no ambiente ou no `.env` do backend têm prioridade. Não versione nem compartilhe arquivos com credenciais. O arquivo `backend/.env.example` contém um modelo sem segredos.
+
+A autenticação usa OAuth2 client credentials, com token em memória e renovação ao expirar ou após HTTP 401. O agente é chamado em modo não streaming, com `stackspot_knowledge` habilitado. Sem configuração válida ou em caso de falha, a classificação é informada como erro; não há fallback fictício.
+
+> A reclamação e o conteúdo da política local são enviados à StackSpot. Use somente dados e ambientes autorizados para o desafio; o armazenamento local não torna a inferência offline.
 
 ---
 
@@ -251,7 +259,7 @@ curl http://localhost:8000/api/export?format=html -o relatorio.html
 ```
 main.py (Rotas HTTP)
     │
-    ├── llm_service.py (Orquestração LLM + RAG)
+    ├── llm_service.py (StackSpot REST + contexto local)
     │       │
     │       ├── politica_interna.txt (Contexto injetado no prompt)
     │       └── sanitizer.py (Ofuscação de termos ofensivos)
@@ -265,7 +273,7 @@ main.py (Rotas HTTP)
 ### Concorrência no Processamento em Lote
 - Usa `asyncio.Semaphore(5)` para limitar requisições simultâneas à LLM
 - Processa linhas do CSV em paralelo com `asyncio.gather()`
-- Retry automático (1x) em caso de falha de parsing JSON
+- Uma nova tentativa em caso de falha na inferência ou parsing; um HTTP 401 também renova o token
 
 ### Sanitização de Texto
 - Regex compilada para performance
@@ -310,9 +318,7 @@ Use o botão **"Importar CSV"** no Header para processar o dataset de exemplo.
 ### Backend
 ```bash
 cd backend
-uv run pytest -v
-# ou
-python -m pytest -v
+python -m unittest discover -s tests -v
 ```
 
 ### Frontend (Lint)
@@ -341,10 +347,10 @@ pip install -r requirements.txt --force-reinstall
 2. Verifique CORS no `main.py` - `allow_origins=["*"]` já configurado
 3. Confira `API_BASE_URL` em `frontend/src/services/api.js`
 
-### Erro de LLM (401/402/429)
-- Verifique `OPEN_ROUTER_KEY` no `.env`
-- Sem key válida → usa **mock automático** (logs mostram `[LLM] Usando classificação mock`)
-- Rate limit → fallback automático para mock
+### Erro na StackSpot (401/403/429)
+- Confira `STACKSPOT_REALM`, `STACKSPOT_CLIENT_ID`, `STACKSPOT_CLIENT_SECRET` e `STACKSPOT_AGENT_URL` no ambiente autorizado.
+- Para `STACKSPOT_ENV_FILE`, confirme que o caminho relativo ao backend existe e que o processo tem permissão de leitura.
+- Verifique as permissões do agente, a conectividade e os limites de uso. Falhas não são convertidas em classificação simulada.
 
 ### Banco SQLite corrompido
 ```bash

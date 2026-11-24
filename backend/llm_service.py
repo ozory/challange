@@ -2,7 +2,12 @@ import json
 import os
 import asyncio
 import logging
+import math
+import re
+import time
+from pathlib import Path
 from typing import Optional
+from urllib.parse import urlsplit
 import httpx
 from schemas import (
     ReclamacaoAnalise,
@@ -18,16 +23,19 @@ logger = logging.getLogger("finguard")
 
 class LLMService:
     def __init__(self):
-        self.api_key = os.getenv("OPEN_ROUTER_KEY")
-        self.base_url = "https://openrouter.ai/api/v1"
-        # Modelo gratuito válido no OpenRouter (NVIDIA Nemotron 3 Ultra)
-        self.model = "nvidia/nemotron-3-ultra-550b-a55b:free"
+        self.realm = os.getenv("STACKSPOT_REALM", "").strip()
+        self.client_id = os.getenv("STACKSPOT_CLIENT_ID", "").strip()
+        self.client_secret = os.getenv("STACKSPOT_CLIENT_SECRET", "").strip()
+        self.agent_url = os.getenv("STACKSPOT_AGENT_URL", "").strip()
+        self._token = None
+        self._expires_at = 0.0
+        self._token_lock = asyncio.Lock()
         self.politica_interna = self._carregar_politica_interna()
 
     def _carregar_politica_interna(self) -> str:
         """Carrega a política interna do arquivo local."""
         try:
-            with open("politica_interna.txt", "r", encoding="utf-8") as f:
+            with Path(__file__).with_name("politica_interna.txt").open("r", encoding="utf-8") as f:
                 return f.read()
         except FileNotFoundError:
             return "Política interna não encontrada. Use as diretrizes padrão."
@@ -65,7 +73,7 @@ Texto da reclamação para análise:
         self, texto: str, max_retries: int = 1
     ) -> Optional[ReclamacaoAnalise]:
         """
-        Classifica uma reclamação usando a LLM com fallback para mock.
+        Classifica uma reclamação usando o agente StackSpot.
 
         Args:
             texto: Texto da reclamação
@@ -74,10 +82,13 @@ Texto da reclamação para análise:
         Returns:
             ReclamacaoAnalise ou None se falhar
         """
-        # Se não tem API key, usa mock direto
-        if not self.api_key:
-            logger.info("[LLM] Sem API key configurada - usando classificação mock")
-            return self._classificacao_mock(texto)
+        if not all((self.realm, self.client_id, self.client_secret, self.agent_url)):
+            logger.error("[LLM] Configuração StackSpot incompleta.")
+            return None
+        url = urlsplit(self.agent_url)
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", self.realm) or url.scheme != "https" or not url.hostname or url.username or url.password:
+            logger.error("[LLM] Configuração StackSpot inválida.")
+            return None
 
         prompt = self._construir_prompt(texto)
 
@@ -88,65 +99,85 @@ Texto da reclamação para análise:
                     # Sanitizar o resumo
                     resultado.resumo = sanitizar_resumo(resultado.resumo)
                     return resultado
-            except Exception as e:
-                logger.error(f"[LLM] Tentativa {tentativa + 1} falhou: {e}")
-                # Se for erro de rate limit, quota, ou modelo não encontrado, cai para mock
-                if "429" in str(e) or "402" in str(e) or "404" in str(e) or "quota" in str(e).lower():
-                    logger.warning(f"[LLM] Fallback para classificação mock devido a limite da API (modelo: {self.model})")
-                    return self._classificacao_mock(texto)
-                if tentativa == max_retries:
-                    # Última tentativa falhou - usa mock como fallback final
-                    logger.warning("Todas as tentativas falharam, usando mock como fallback")
-                    return self._classificacao_mock(texto)
-                await asyncio.sleep(1)  # Pequeno delay antes de retry
+            except (httpx.HTTPError, ValueError, TypeError, KeyError) as erro:
+                logger.warning("[LLM] Tentativa %d falhou (%s).", tentativa + 1, type(erro).__name__)
+            if tentativa < max_retries:
+                await asyncio.sleep(1)
 
         return None
 
-    async def _chamar_llm(self, prompt: str) -> Optional[ReclamacaoAnalise]:
-        """Chama a API da LLM via OpenRouter."""
-        logger.info(f"[LLM] Modelo em uso: {self.model}")
-        logger.info(f"[LLM] Endpoint: {self.base_url}/chat/completions")
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "http://localhost:8000",
-            "X-Title": "FinGuard",
-        }
-
-        payload = {
-            "model": self.model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "Você é um classificador de reclamações financeiras. Responda APENAS com JSON válido.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.1,
-            "max_tokens": 500,
-            "response_format": {"type": "json_object"},
-        }
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
+    async def _obter_token(self, client: httpx.AsyncClient) -> str:
+        async with self._token_lock:
+            if self._token and time.monotonic() < self._expires_at:
+                return self._token
+            inicio = time.monotonic()
             response = await client.post(
-                f"{self.base_url}/chat/completions", headers=headers, json=payload
+                f"https://idm.stackspot.com/{self.realm}/oidc/oauth/token",
+                data={"grant_type": "client_credentials", "client_id": self.client_id, "client_secret": self.client_secret},
+                timeout=60.0,
             )
-            logger.info(f"[LLM] Response status: {response.status_code}")
             response.raise_for_status()
-            data = response.json()
+            dados = response.json()
+            token = dados["access_token"]
+            validade = float(dados["expires_in"])
+            if not isinstance(token, str) or not token.strip() or not math.isfinite(validade) or validade <= 0:
+                raise ValueError("Token StackSpot inválido.")
+            self._token = token
+            self._expires_at = inicio + validade - min(30, validade * 0.1)
+            return token
 
-            # Log do modelo efetivamente usado (pode diferir do solicitado se houver fallback)
-            model_used = data.get("model", self.model)
-            logger.info(f"[LLM] Modelo efetivamente usado: {model_used}")
+    async def _invalidar_token(self, token: str) -> None:
+        async with self._token_lock:
+            if self._token == token:
+                self._token = None
+                self._expires_at = 0.0
 
-            content = data["choices"][0]["message"]["content"]
-            return self._parsear_resposta(content)
+    @staticmethod
+    def _extrair_classificacao(resposta) -> dict:
+        campos = {"categoria", "produto", "sentimento", "urgencia", "resumo"}
+        valor = resposta
+        for _ in range(8):
+            if isinstance(valor, dict):
+                if campos.issubset(valor):
+                    return valor
+                for chave in ("message", "response", "result", "content", "text"):
+                    if chave in valor and valor[chave] is not None:
+                        valor = valor[chave]
+                        break
+                else:
+                    raise ValueError("Resposta StackSpot sem classificação.")
+            elif isinstance(valor, str):
+                texto = valor.strip()
+                bloco = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", texto, re.IGNORECASE | re.DOTALL)
+                valor = json.loads(bloco.group(1) if bloco else texto)
+            else:
+                raise ValueError("Formato de resposta StackSpot inválido.")
+        raise ValueError("Resposta StackSpot contém aninhamento excessivo.")
+
+    async def _chamar_llm(self, prompt: str) -> Optional[ReclamacaoAnalise]:
+        """Chama o agente StackSpot em modo não streaming."""
+        payload = {
+            "streaming": False,
+            "user_prompt": prompt,
+            "stackspot_knowledge": True,
+            "return_ks_in_response": False,
+            "deep_search_ks": False,
+        }
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=False) as client:
+            for tentativa in range(2):
+                token = await self._obter_token(client)
+                response = await client.post(self.agent_url, headers={"Authorization": f"Bearer {token}"}, json=payload)
+                if response.status_code == 401 and tentativa == 0:
+                    await self._invalidar_token(token)
+                    continue
+                response.raise_for_status()
+                dados = self._extrair_classificacao(response.json())
+                return self._parsear_resposta(json.dumps(dados, ensure_ascii=False))
+        return None
 
     def _parsear_resposta(self, content: str) -> Optional[ReclamacaoAnalise]:
         """Parseia a resposta JSON da LLM."""
         try:
-            # Tentar extrair JSON se houver texto extra
             content = content.strip()
             if content.startswith("```json"):
                 content = content[7:]
@@ -156,12 +187,13 @@ Texto da reclamação para análise:
 
             dados = json.loads(content)
 
-            # Validar enums
-            categoria = CategoriaEnum(dados.get("categoria", "Outros"))
-            produto = ProdutoEnum(dados.get("produto", "Não Identificado"))
-            sentimento = SentimentoEnum(dados.get("sentimento", "Neutro"))
-            urgencia = UrgenciaEnum(dados.get("urgencia", "Baixa"))
-            resumo = dados.get("resumo", "Resumo não disponível")
+            categoria = CategoriaEnum(dados["categoria"])
+            produto = ProdutoEnum(dados["produto"])
+            sentimento = SentimentoEnum(dados["sentimento"])
+            urgencia = UrgenciaEnum(dados["urgencia"])
+            resumo = dados["resumo"]
+            if not isinstance(resumo, str) or not resumo.strip():
+                raise ValueError("Resumo inválido.")
 
             return ReclamacaoAnalise(
                 id="",  # Será preenchido pelo chamador
@@ -172,152 +204,9 @@ Texto da reclamação para análise:
                 urgencia=urgencia,
                 resumo=resumo,
             )
-        except (json.JSONDecodeError, ValueError, KeyError) as e:
-            logger.error(f"Erro ao parsear resposta da LLM: {e}")
-            logger.debug(f"Conteúdo recebido: {content}")
+        except (json.JSONDecodeError, ValueError, KeyError, TypeError):
+            logger.warning("[LLM] Resposta StackSpot inválida.")
             return None
-
-    def _classificacao_mock(self, texto: str) -> ReclamacaoAnalise:
-        """Classificação mock para desenvolvimento sem API key."""
-        logger.info(f"[LLM] Usando classificação mock (modelo solicitado: {self.model})")
-        texto_lower = texto.lower()
-
-        # Lógica simples baseada em palavras-chave
-        if any(
-            p in texto_lower
-            for p in [
-                "fraude",
-                "não autoriz",
-                "acessou minha conta",
-                "vazou",
-                "golpe",
-                "transação que eu não fiz",
-            ]
-        ):
-            categoria = CategoriaEnum.FRAUDE_SEGURANCA
-            urgencia = UrgenciaEnum.CRITICA
-            sentimento = SentimentoEnum.CRITICO
-        elif any(
-            p in texto_lower
-            for p in [
-                "cobrança indevida",
-                "taxa não informada",
-                "juros errado",
-                "anuidade",
-                "cobraram",
-                "reajuste sem aviso",
-            ]
-        ):
-            categoria = CategoriaEnum.COBRANCA_INDEVIDA
-            urgencia = UrgenciaEnum.ALTA
-            sentimento = SentimentoEnum.NEGATIVO
-        elif any(
-            p in texto_lower
-            for p in ["cancelamento", "cancelar", "cancelei", "não existe mais"]
-        ):
-            categoria = CategoriaEnum.CANCELAMENTO
-            urgencia = UrgenciaEnum.MEDIA
-            sentimento = SentimentoEnum.NEGATIVO
-        elif any(
-            p in texto_lower
-            for p in [
-                "atendimento",
-                "transferido",
-                "espera",
-                "atendente",
-                "sac",
-                "ouvidoria",
-                "ninguém resolve",
-            ]
-        ):
-            categoria = CategoriaEnum.ATENDIMENTO
-            urgencia = UrgenciaEnum.MEDIA
-            sentimento = SentimentoEnum.NEGATIVO
-        elif any(
-            p in texto_lower
-            for p in [
-                "app não funciona",
-                "pix não funciona",
-                "erro no aplicativo",
-                "sistema fora do ar",
-            ]
-        ):
-            categoria = CategoriaEnum.PRODUTO_SERVICO
-            urgencia = UrgenciaEnum.MEDIA
-            sentimento = SentimentoEnum.NEGATIVO
-        else:
-            categoria = CategoriaEnum.OUTROS
-            urgencia = UrgenciaEnum.BAIXA
-            sentimento = SentimentoEnum.NEUTRO
-
-        # Determinar produto
-        if any(p in texto_lower for p in ["cartão", "fatura", "anuidade", "limite"]):
-            produto = ProdutoEnum.CARTAO_CREDITO
-        elif any(
-            p in texto_lower
-            for p in [
-                "conta corrente",
-                "pix",
-                "transferência",
-                "tarifa",
-                "pacote digital",
-            ]
-        ):
-            produto = ProdutoEnum.CONTA_CORRENTE
-        elif any(
-            p in texto_lower for p in ["empréstimo", "parcela", "juros", "contratei"]
-        ):
-            produto = ProdutoEnum.EMPRESTIMO
-        elif any(
-            p in texto_lower
-            for p in [
-                "investimento",
-                "fundo",
-                "taxa de performance",
-                "rentabilidade",
-                "resgate",
-            ]
-        ):
-            produto = ProdutoEnum.INVESTIMENTOS
-        elif any(
-            p in texto_lower
-            for p in [
-                "seguro",
-                "apólice",
-                "cobertura",
-                "sinistro",
-                "beneficiário",
-                "seguro de vida",
-                "seguro residencial",
-            ]
-        ):
-            produto = ProdutoEnum.SEGUROS
-        else:
-            produto = ProdutoEnum.NAO_IDENTIFICADO
-
-        # Gerar resumo simples
-        resumo = f"Cliente relata {categoria.value.lower()} relacionado a {produto.value.lower()}. "
-        if "desesperado" in texto_lower or "imploro" in texto_lower:
-            resumo += "Situação de urgência financeira crítica."
-        elif (
-            "advogado" in texto_lower
-            or "procon" in texto_lower
-            or "banco central" in texto_lower
-        ):
-            resumo += "Cliente ameaça medidas legais/regulatórias."
-        else:
-            resumo += "Aguardando resolução."
-
-        return ReclamacaoAnalise(
-            id="",
-            texto_original=texto,
-            categoria=categoria,
-            produto=produto,
-            sentimento=sentimento,
-            urgencia=urgencia,
-            resumo=sanitizar_resumo(resumo),
-        )
-
 
 # Instância global
 llm_service = LLMService()
