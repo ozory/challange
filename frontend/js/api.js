@@ -40,6 +40,14 @@
       form.append('file', file); // o navegador define o boundary do multipart
       return json('/upload-csv', { method: 'POST', body: form });
     },
+    registrarEventoSeguranca: function (type, detail) {
+      // Fire-and-forget: falha no log nunca deve afetar o usuário
+      fetch(API_BASE_URL + '/security/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: type, detail: detail })
+      }).catch(function () {});
+    },
     listarReclamacoes: function () { return json('/tickets'); },
     obterMetricas: function () { return json('/metrics'); },
     exportarDados: function (format) {

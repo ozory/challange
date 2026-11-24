@@ -1,6 +1,8 @@
 from typing import List
 from schemas import ReclamacaoAnalise
 import json
+import html as _html
+from security.sanitizers import neutralize_csv_formula
 import pandas as pd
 from datetime import datetime
 
@@ -18,6 +20,8 @@ class Exporter:
     def to_csv(reclamacoes: List[ReclamacaoAnalise]) -> str:
         """Exporta para CSV."""
         df = pd.DataFrame([r.model_dump() for r in reclamacoes])
+        for col in df.select_dtypes(include="object").columns:
+            df[col] = df[col].map(neutralize_csv_formula)  # evita CSV/formula injection
         return df.to_csv(index=False, encoding='utf-8')
     
     @staticmethod
@@ -61,14 +65,14 @@ class Exporter:
             
             linhas_tabela += f"""
             <tr class="{fraud_class}">
-                <td>{r.id}</td>
-                <td>{r.data_registro or 'N/A'}</td>
-                <td>{r.canal or 'N/A'}</td>
+                <td>{_html.escape(r.id)}</td>
+                <td>{_html.escape(r.data_registro or 'N/A')}</td>
+                <td>{_html.escape(r.canal or 'N/A')}</td>
                 <td>{r.categoria.value}</td>
                 <td>{r.produto.value}</td>
                 <td>{r.sentimento.value}</td>
                 <td class="{urgencia_class}">{r.urgencia.value}</td>
-                <td>{r.resumo[:100]}...</td>
+                <td>{_html.escape(r.resumo[:100])}...</td>
             </tr>"""
         
         html = f"""<!DOCTYPE html>

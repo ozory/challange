@@ -12,7 +12,7 @@
     var messages = el('div', { class: 'chat-messages' });
     var errorSlot = el('div');
     var textarea = el('textarea', {
-      class: 'input', rows: 3, placeholder: 'Digite a reclamação do cliente aqui...',
+      class: 'input', rows: 3, maxlength: FG.security.config.maxTextLength, placeholder: 'Digite a reclamação do cliente aqui...',
       oninput: updateSendState,
       onkeydown: function (e) {
         // Enter envia; Shift+Enter quebra linha
@@ -97,6 +97,11 @@
       e.preventDefault();
       var texto = textarea.value.trim();
       if (!texto || enviando) return;
+
+      // Camada 1: validação no cliente antes de enviar
+      var check = FG.security.validateText(texto);
+      if (!check.ok) { showError(check.error); return; }
+      texto = check.texto;
 
       textarea.value = '';
       showError(null);

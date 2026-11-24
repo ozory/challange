@@ -43,6 +43,8 @@
     function handleFileUpload() {
       var file = fileInput.files[0];
       if (!file) return;
+      var check = FG.security.validateFile(file);
+      if (!check.ok) { alert(check.error); fileInput.value = ''; return; }
       uploading = true; setBusy();
       api.uploadCSV(file).then(function (result) {
         if (result.success) {
@@ -53,7 +55,7 @@
         }
       }).catch(function (err) {
         console.error('Erro no upload:', err);
-        alert('Erro ao fazer upload do arquivo');
+        alert(err && err.message ? err.message : 'Erro ao fazer upload do arquivo');
       }).then(function () {
         uploading = false; setBusy();
         fileInput.value = '';

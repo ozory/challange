@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, Query
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -39,6 +39,11 @@ from llm_service import llm_service
 from repository import repository
 from exporter import exporter
 from sanitizer import sanitizar_resumo
+from security.config import security_config as sec
+from security.middleware import SecurityMiddleware, client_ip
+from security.exceptions import SecurityViolation
+from security.sanitizers import clean_text, clean_field
+from security.audit_logger import log_event
 
 
 app = FastAPI(
@@ -50,11 +55,13 @@ app = FastAPI(
 # CORS para permitir frontend local
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=sec.cors_origins,  # CORS_ORIGINS no .env
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Content-Type"],
 )
+# Camada 2: headers de segurança, rate limit e limite de tamanho (adicionado por último = mais externo)
+app.add_middleware(SecurityMiddleware)
 
 
 # Semaphore para limitar concorrência no processamento em lote
@@ -91,6 +98,8 @@ async def classificar_reclamacao(input_data: ReclamacaoInput):
     Recebe texto livre e retorna análise estruturada.
     """
     try:
+        if sec.layer(sec.backend_enabled):
+            input_data.texto = clean_text(input_data.texto, sec.max_text_length)
         if not input_data.texto or not input_data.texto.strip():
             raise HTTPException(status_code=400, detail="Texto da reclamação não pode ser vazio")
         
@@ -116,8 +125,11 @@ async def classificar_reclamacao(input_data: ReclamacaoInput):
     
     except HTTPException:
         raise
+    except SecurityViolation as e:
+        raise HTTPException(status_code=400, detail=e.public_message)
     except Exception as e:
-        return ClassifyResponse(success=False, error=str(e))
+        logger.exception("Erro ao classificar")
+        return ClassifyResponse(success=False, error="Erro interno ao classificar a reclamação")
 
 
 @app.post("/api/upload-csv", response_model=BatchResponse)
@@ -127,12 +139,21 @@ async def upload_csv(file: UploadFile = File(...)):
     Espera colunas: id, data_reclamacao, canal, texto_reclamacao, produto, status
     """
     try:
-        if not file.filename.endswith('.csv'):
+        if not (file.filename or "").lower().endswith('.csv'):
             raise HTTPException(status_code=400, detail="Arquivo deve ser CSV")
         
-        # Ler CSV
-        content = await file.read()
-        df = pd.read_csv(io.BytesIO(content))
+        # Ler CSV (com teto de tamanho, independente do Content-Length)
+        content = await file.read(sec.max_request_bytes + 1)
+        if len(content) > sec.max_request_bytes:
+            log_event("CSV_TOO_LARGE", "backend", filename=file.filename)
+            raise HTTPException(status_code=413, detail="Arquivo CSV muito grande")
+        try:
+            df = pd.read_csv(io.BytesIO(content))
+        except Exception:
+            raise HTTPException(status_code=400, detail="CSV inválido ou corrompido")
+        if len(df) > sec.max_csv_rows:
+            log_event("CSV_TOO_MANY_ROWS", "backend", rows=len(df))
+            raise HTTPException(status_code=413, detail=f"CSV excede o limite de {sec.max_csv_rows} linhas")
         
         # Validar colunas obrigatórias
         colunas_esperadas = ['id', 'data_reclamacao', 'canal', 'texto_reclamacao', 'produto', 'status']
@@ -153,15 +174,18 @@ async def upload_csv(file: UploadFile = File(...)):
                     if not analise:
                         return {"id": row['id'], "sucesso": False, "erro": "Falha na classificação"}
                     
-                    analise.id = str(row['id'])
-                    analise.texto_original = texto
-                    analise.data_registro = str(row['data_reclamacao'])
-                    analise.canal = str(row['canal'])
+                    analise.id = clean_field(row['id'], 64)
+                    analise.texto_original = clean_text(texto, sec.max_text_length)
+                    analise.data_registro = clean_field(row['data_reclamacao'], 64)
+                    analise.canal = clean_field(row['canal'], 64)
                     
                     repository.salvar(analise)
                     return {"id": row['id'], "sucesso": True}
-                except Exception as e:
-                    return {"id": row['id'], "sucesso": False, "erro": str(e)}
+                except SecurityViolation as e:
+                    return {"id": row['id'], "sucesso": False, "erro": e.public_message}
+                except Exception:
+                    logger.exception("Erro ao processar linha do CSV")
+                    return {"id": row['id'], "sucesso": False, "erro": "Erro ao processar linha"}
         
         # Executar processamento paralelo
         tarefas = [processar_linha(row) for _, row in df.iterrows()]
@@ -181,6 +205,21 @@ async def upload_csv(file: UploadFile = File(...)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao processar CSV: {str(e)}")
+
+
+class FrontendSecurityEvent(BaseModel):
+    type: str
+    detail: Optional[str] = None
+
+
+_FRONTEND_EVENTS = {"FORBIDDEN_INPUT", "TEXT_TOO_LONG", "SUSPICIOUS_PATTERN", "CSV_REJECTED"}
+
+
+@app.post("/api/security/log", status_code=204)
+async def registrar_evento_frontend(event: FrontendSecurityEvent, request: Request):
+    """Recebe eventos bloqueados pela camada 1 (apenas tipos conhecidos, texto truncado)."""
+    if event.type in _FRONTEND_EVENTS:
+        log_event(event.type, "frontend", ip=client_ip(request), detail=(event.detail or "")[:100])
 
 
 @app.get("/api/tickets", response_model=List[ReclamacaoAnalise])

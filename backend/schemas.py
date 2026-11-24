@@ -2,6 +2,7 @@ from enum import Enum
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
+from security.config import security_config
 
 
 class CategoriaEnum(str, Enum):
@@ -37,7 +38,7 @@ class UrgenciaEnum(str, Enum):
 
 
 class ReclamacaoInput(BaseModel):
-    texto: str
+    texto: str = Field(max_length=security_config.max_text_length * 2)  # teto duro; guard faz o resto
 
 
 class ReclamacaoAnalise(BaseModel):
