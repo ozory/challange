@@ -44,6 +44,7 @@ from security.middleware import SecurityMiddleware, client_ip
 from security.exceptions import SecurityViolation
 from security.sanitizers import clean_text, clean_field
 from security.audit_logger import log_event
+from security.pii_masker import mask_pii
 
 
 app = FastAPI(
@@ -99,7 +100,7 @@ async def classificar_reclamacao(input_data: ReclamacaoInput):
     """
     try:
         if sec.layer(sec.backend_enabled):
-            input_data.texto = clean_text(input_data.texto, sec.max_text_length)
+            input_data.texto = mask_pii(clean_text(input_data.texto, sec.max_text_length))
         if not input_data.texto or not input_data.texto.strip():
             raise HTTPException(status_code=400, detail="Texto da reclamação não pode ser vazio")
         
@@ -165,7 +166,7 @@ async def upload_csv(file: UploadFile = File(...)):
         async def processar_linha(row):
             async with SEMAPHORE:
                 try:
-                    texto = str(row['texto_reclamacao']).strip()
+                    texto = mask_pii(str(row['texto_reclamacao']).strip())
                     if not texto or texto.lower() == 'nan':
                         return {"id": row['id'], "sucesso": False, "erro": "Texto vazio"}
                     

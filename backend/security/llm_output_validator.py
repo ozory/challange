@@ -2,6 +2,7 @@
 import re
 
 from .audit_logger import log_event
+from .pii_masker import mask_pii
 from .config import security_config as cfg
 from .sanitizers import clean_text, strip_html
 
@@ -37,6 +38,7 @@ def validate_summary(resumo) -> str:
     original = resumo
     resumo = clean_text(strip_html(resumo), cfg.max_summary_length)
     resumo = _URL.sub("[link removido]", resumo)
+    resumo = mask_pii(resumo)  # a LLM pode repetir/inventar dados pessoais no resumo
 
     if not resumo or _LEAK_MARKERS.search(resumo):
         log_event("LLM_OUTPUT_LEAK_BLOCKED", "llm_output", preview=original)

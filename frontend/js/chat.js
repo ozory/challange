@@ -30,10 +30,28 @@
     messages.appendChild(emptyState);
     var typing = null;
 
+    var clearBtn = el('button', {
+      type: 'button', class: 'btn btn-ghost btn-icon danger', title: 'Limpar conversa', 'aria-label': 'Limpar conversa',
+      onclick: clearChat
+    }, icon('trash'));
+
     function updateSendState() {
       sendBtn.disabled = !textarea.value.trim() || enviando;
+      clearBtn.disabled = enviando;
     }
     updateSendState();
+
+    // Limpa a conversa e deixa o chat pronto para novas entradas
+    function clearChat() {
+      if (enviando) return;
+      FG.clear(messages);
+      messages.appendChild(emptyState);
+      typing = null;
+      showError(null);
+      textarea.value = '';
+      updateSendState();
+      textarea.focus();
+    }
 
     function scrollToBottom() {
       messages.scrollTo({ top: messages.scrollHeight, behavior: 'smooth' });
@@ -133,9 +151,15 @@
     }
 
     return el('div', { class: 'chat' },
-      el('div', { class: 'panel-head' },
-        el('h2', { class: 'panel-title' }, icon('bot'), 'Chatbot de Triagem'),
-        el('p', { class: 'text-xs text-muted', style: { marginTop: '0.25rem' } }, 'Digite uma reclamação em texto livre para análise imediata')),
+      el('div', {
+        class: 'panel-head chat-head',
+        // estilo inline: garante o alinhamento mesmo se o styles.css vier do cache
+        style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }
+      },
+        el('div', null,
+          el('h2', { class: 'panel-title' }, icon('bot'), 'Chatbot de Triagem'),
+          el('p', { class: 'text-xs text-muted', style: { marginTop: '0.25rem' } }, 'Digite uma reclamação em texto livre para análise imediata')),
+        clearBtn),
       messages, errorSlot, form);
   }
 

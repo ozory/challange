@@ -5,6 +5,7 @@ from typing import Optional
 from .audit_logger import log_event
 from .config import security_config as cfg
 from .exceptions import SecurityViolation
+from .pii_masker import mask_pii
 from .sanitizers import clean_text
 
 # Padrões típicos de prompt injection (pt/en), aplicados sobre texto normalizado.
@@ -34,7 +35,8 @@ def guard_input(text: str, source: str = "api") -> str:
     if not cfg.layer(cfg.llm_input_guard_enabled):
         return text
 
-    text = clean_text(text, cfg.max_text_length)
+    # Mascara PII antes de qualquer outra coisa: o que sai daqui vai para a LLM externa e para o log
+    text = mask_pii(clean_text(text, cfg.max_text_length))
     if not text:
         raise SecurityViolation("EMPTY_INPUT", "Texto da reclamação não pode ser vazio")
 

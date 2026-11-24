@@ -1,0 +1,10 @@
+[
+  {
+    "id": "REC-TESTE-PII-001",
+    "data_reclamacao": "2026-11-24",
+    "canal": "Ouvidoria",
+    "texto_reclamacao": "Notei duas compras no débito que eu não fiz: R$ 212,00 numa loja online e R$ 78,50 num posto em Recife, e moro em Belo Horizonte. Meu CPF é 529.982.247-25 (ou 52998224725 sem pontuação), meu cartão final 4111 1111 1111 1111 foi clonado. Me retornem pelo e-mail maria.souza@exemplo.com.br ou pelo celular (31) 99876-5432. Minha empresa, CNPJ 11.222.333/0001-81, também usa essa conta. Já bloqueei o cartão pelo app e quero que investiguem como meus dados vazaram. Protocolo 20261124001.",
+    "produto": "Conta Corrente",
+    "status": "Aberta"
+  }
+]

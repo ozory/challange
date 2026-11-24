@@ -36,6 +36,9 @@ class SecurityConfig:
         "CORS_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000"))
     audit_log_file: str = field(default_factory=lambda: os.getenv("AUDIT_LOG_FILE", "security_audit.log"))
 
+    # Mascaramento de PII (CPF, CNPJ, cartão, e-mail, telefone) - usado em várias camadas
+    pii_masking_enabled: bool = field(default_factory=lambda: _bool("PII_MASKING_ENABLED"))
+
     # Camada 3 - entrada da LLM
     llm_input_guard_enabled: bool = field(default_factory=lambda: _bool("LLM_INPUT_GUARD_ENABLED"))
 
