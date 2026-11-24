@@ -1,5 +1,7 @@
 # FinGuard - Análise de Segurança e Arquitetura Plug-and-Play
 
+> Este documento descreve propostas e exemplos históricos. O serviço atual utiliza StackSpot AI e não utiliza fallback de classificação mock; os trechos de código abaixo não devem ser interpretados como implementação ativa.
+
 ## Visão Geral
 
 Este documento descreve uma arquitetura de segurança em **4 camadas** (Frontend → Backend → LLM Input → LLM Output) projetada para ser **plug-and-play**, permitindo que cada camada seja habilitada/desabilitada independentemente via configuração.

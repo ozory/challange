@@ -7,24 +7,38 @@ from pydantic import BaseModel
 from typing import List, Optional
 import asyncio
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime
 import pandas as pd
 import io
 import logging
+import os
 import sys
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
-# Carregar variáveis de ambiente do .env
-load_dotenv()
+BACKEND_DIR = Path(__file__).resolve().parent
+load_dotenv(BACKEND_DIR / ".env")
+arquivo_compartilhado = os.getenv("STACKSPOT_ENV_FILE", "").strip()
+if arquivo_compartilhado:
+    caminho = Path(arquivo_compartilhado).expanduser()
+    if not caminho.is_absolute():
+        caminho = BACKEND_DIR / caminho
+    valores = dotenv_values(caminho)
+    for nome in ("STACKSPOT_REALM", "STACKSPOT_CLIENT_ID", "STACKSPOT_CLIENT_SECRET",
+                 "STACKSPOT_AGENT_ID", "STACKSPOT_AGENT_URL"):
+        if not os.environ.get(nome) and valores.get(nome):
+            os.environ[nome] = valores[nome]
 
-# Configurar logging com data/hora local
+# Configurar logging com data/hora local.
+# O arquivo fica junto do backend (independe do diretório de execução) e aceita override por env.
+APP_LOG_FILE = Path(os.getenv("APP_LOG_FILE", "").strip() or BACKEND_DIR / "backend.log")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("backend.log", encoding="utf-8"),
+        logging.FileHandler(APP_LOG_FILE, encoding="utf-8"),
     ],
 )
 
@@ -47,10 +61,30 @@ from security.audit_logger import log_event
 from security.pii_masker import mask_pii
 
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Deixa explícito no log qual provedor de LLM está ativo e se o .env está completo."""
+    cfg = llm_service.resumo_configuracao()
+    logger.info("[LLM] Provedor: %s", cfg["provedor"])
+    logger.info("[LLM] Agente: %s", cfg["agent_id"])
+    logger.info("[LLM] Endpoint de inferência: %s", cfg["endpoint"])
+    logger.info("[LLM] Endpoint de autenticação: %s", cfg["token_url"])
+    problemas = llm_service.problemas_de_configuracao()
+    if problemas:
+        logger.error("[LLM] StackSpot indisponível: %s. Ajuste o backend/.env antes de classificar.",
+                     "; ".join(problemas))
+    else:
+        logger.info("[LLM] Credenciais StackSpot carregadas; classificação habilitada.")
+    logger.info("[APP] Log da aplicação: %s", APP_LOG_FILE)
+    logger.info("[APP] Frontend servido em /app")
+    yield
+
+
 app = FastAPI(
     title="FinGuard API",
     description="API para triagem inteligente de reclamações financeiras",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 # CORS para permitir frontend local
@@ -89,7 +123,13 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    """Saúde da API e estado da integração com a StackSpot (sem expor segredos)."""
+    llm = llm_service.resumo_configuracao()
+    return {
+        "status": "ok" if llm["configurado"] else "degraded",
+        "llm": llm,
+        "frontend": "/app",
+    }
 
 
 @app.post("/api/classify", response_model=ClassifyResponse)

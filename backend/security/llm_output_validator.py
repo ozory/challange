@@ -10,7 +10,8 @@ _ALLOWED_KEYS = {"categoria", "produto", "sentimento", "urgencia", "resumo"}
 _URL = re.compile(r"(https?://|www\.)\S+", re.IGNORECASE)
 _LEAK_MARKERS = re.compile(
     r"(politica_interna|system prompt|prompt do sistema|instru(c|ç)(ões|oes) internas|"
-    r"sk-[A-Za-z0-9_-]{16,}|Bearer\s+[A-Za-z0-9._-]{16,}|OPEN_ROUTER_KEY)", re.IGNORECASE)
+    r"sk-[A-Za-z0-9_-]{16,}|Bearer\s+[A-Za-z0-9._-]{16,}|"
+    r"STACKSPOT_CLIENT_SECRET|STACKSPOT_CLIENT_ID|client_secret)", re.IGNORECASE)
 
 FALLBACK_SUMMARY = "Resumo indisponível: conteúdo gerado foi descartado por política de segurança."
 

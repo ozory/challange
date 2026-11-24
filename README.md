@@ -6,7 +6,7 @@
 
 ## 📋 Visão Geral
 
-O **FinGuard** é uma aplicação web full-stack que recebe reclamações em texto livre (via chatbot individual ou importação em lote via CSV) e utiliza um Provedor de LLM com RAG local para classificar, resumir e priorizar os atendimentos, alimentando dinamicamente um Dashboard gerencial.
+O **FinGuard** é uma aplicação web full-stack que recebe reclamações em texto livre (via chatbot individual ou importação em lote via CSV) e utiliza a StackSpot AI com a política interna local como contexto para classificar, resumir e priorizar os atendimentos, alimentando dinamicamente um Dashboard gerencial.
 
 O frontend é escrito em **HTML, CSS e JavaScript puro** (sem React, sem npm, sem etapa de build) e é servido pelo próprio backend FastAPI. Para rodar a solução completa basta **Python**.
 
@@ -18,7 +18,7 @@ O frontend é escrito em **HTML, CSS e JavaScript puro** (sem React, sem npm, se
 | 📊 **Processamento em Lote (CSV)** | Suporta dataset de ~500 reclamações com concorrência controlada |
 | 🛡️ **Ofuscação de Palavras Impróprias** | Remove/sanitiza termos ofensivos no campo `resumo` |
 | 📤 **Exportação Múltipla** | JSON, CSV e HTML consolidado com gráficos Chart.js |
-| 🏠 **100% Local** | Sem dependência de nuvem - SQLite local, processamento local |
+| 🏠 **Persistência local** | SQLite e arquivos de exportação permanecem locais; a inferência usa a API StackSpot |
 
 ---
 
@@ -36,7 +36,7 @@ O frontend é escrito em **HTML, CSS e JavaScript puro** (sem React, sem npm, se
 | **httpx** | 0.26.0 | Cliente HTTP assíncrono para LLM |
 | **truststore** | >=0.9.0 | Usa os certificados do sistema operacional no HTTPS (redes com proxy corporativo) |
 | **python-dotenv** | 1.0.0 | Variáveis de ambiente |
-| **OpenRouter API** | - | Integração LLM (modelo gratuito) |
+| **StackSpot AI** | REST | Agente de classificação e Knowledge Source |
 
 ### Frontend (`frontend/`)
 | Tecnologia | Uso |
@@ -62,7 +62,7 @@ challange/
 ├── backend/
 │   ├── main.py               # Entrada FastAPI, rotas HTTP, CORS e hospedagem do frontend
 │   ├── schemas.py            # Modelos Pydantic e Enums
-│   ├── llm_service.py        # Integração LLM + RAG (política interna)
+│   ├── llm_service.py        # StackSpot REST + contexto da política interna
 │   ├── sanitizer.py          # Filtro de palavras impróprias
 │   ├── repository.py         # Camada SQLite (thread-safe)
 │   ├── exporter.py           # Gerador de relatórios (JSON/CSV/HTML)
@@ -128,21 +128,30 @@ Acesse a aplicação em: **http://localhost:8000/app/**
 > - Documentação ReDoc: `http://localhost:8000/redoc`
 
 #### Variáveis de Ambiente (Backend)
-Crie um arquivo `.env` na pasta `backend/`:
+Crie um arquivo `.env` na pasta `backend/` com as credenciais do agente autorizado:
 ```env
-# OpenRouter API Key (obrigatório para LLM real)
-# Obtenha em: https://openrouter.ai/keys
-OPEN_ROUTER_KEY=sua_chave_aqui
-
-# Opcional: caminho de um bundle de CA (.pem) a ser usado na validação HTTPS.
-# Útil em redes corporativas com inspeção SSL. Se omitido, usa o repositório
-# de certificados do sistema operacional (truststore).
-# LLM_CA_BUNDLE=C:\caminho\ca-corporativa.pem
+STACKSPOT_REALM=seu_realm
+STACKSPOT_CLIENT_ID=seu_client_id
+STACKSPOT_CLIENT_SECRET=seu_client_secret
+STACKSPOT_AGENT_ID=SEU_AGENT_ID
+# Opcional: a URL é montada a partir do AGENT_ID; informe apenas para usar outro host.
+STACKSPOT_AGENT_URL=https://genai-inference-app.stackspot.com/v1/agent/SEU_AGENT_ID/chat
 ```
 
-> O modelo está definido em `backend/llm_service.py` (`nvidia/nemotron-3-ultra-550b-a55b:free`). Para trocar, altere `self.model` nesse arquivo.
+Confira a configuração carregada em `http://localhost:8000/health` (campo `llm`), que também
+aparece no log do backend durante o startup — sem expor segredos.
 
-> **Sem API Key:** O sistema usa classificação **mock** baseada em palavras-chave (funciona offline para desenvolvimento/testes).
+Na mesma máquina com o projeto `finguard-nivel1`, é possível reutilizar sua configuração sem copiar o segredo:
+
+```env
+STACKSPOT_ENV_FILE=../../finguard-nivel1/.env
+```
+
+O caminho é relativo à pasta `backend/`; valores preenchidos no ambiente ou no `.env` do backend têm prioridade. Não versione nem compartilhe arquivos com credenciais. O arquivo `backend/.env.example` contém um modelo sem segredos.
+
+A autenticação usa OAuth2 client credentials, com token em memória e renovação ao expirar ou após HTTP 401. O agente é chamado em modo não streaming, com `stackspot_knowledge` habilitado. Sem configuração válida ou em caso de falha, a classificação é informada como erro; não há fallback fictício.
+
+> A reclamação e o conteúdo da política local são enviados à StackSpot. Use somente dados e ambientes autorizados para o desafio; o armazenamento local não torna a inferência offline.
 
 ---
 
@@ -235,7 +244,7 @@ curl http://localhost:8000/api/export?format=html -o relatorio.html
 ```
 main.py (Rotas HTTP + arquivos estáticos do frontend)
     │
-    ├── llm_service.py (Orquestração LLM + RAG)
+    ├── llm_service.py (StackSpot REST + contexto local)
     │       │
     │       ├── politica_interna.txt (Contexto injetado no prompt)
     │       └── sanitizer.py (Ofuscação de termos ofensivos)
@@ -252,7 +261,7 @@ O `politica_interna.txt` é pequeno (poucos KB) e é lido pelo `llm_service.py` 
 ### Concorrência no Processamento em Lote
 - Usa `asyncio.Semaphore(5)` para limitar requisições simultâneas à LLM
 - Processa linhas do CSV em paralelo com `asyncio.gather()`
-- Retry automático (1x) em caso de falha de parsing JSON
+- Uma nova tentativa em caso de falha na inferência ou parsing; um HTTP 401 também renova o token
 
 ### Sanitização de Texto
 - Regex compilada para performance
@@ -299,13 +308,17 @@ Use o botão **"Importar CSV"** no Header para processar o dataset de exemplo.
 
 ## 🧪 Testes
 
-Atualmente o projeto **não possui testes automatizados**. As dependências de teste (`pytest`, `pytest-asyncio`) estão declaradas em `pyproject.toml`, e a configuração aponta para a pasta `backend/tests/` (ainda não criada).
+### Backend
+```bash
+cd backend
+python -m unittest discover -s tests -v
+```
 
-Verificação manual sugerida:
-1. Subir o backend e abrir `http://localhost:8000/app/`
-2. Enviar uma reclamação no chat e conferir badges e resumo
-3. Importar o `data.csv` e conferir Dashboard e Tabela
-4. Exportar JSON, CSV e HTML
+### Frontend (Lint)
+```bash
+cd frontend
+npm run lint
+```
 
 ---
 
@@ -334,13 +347,10 @@ No PowerShell use `.venv\Scripts\Activate.ps1` (não é um comando do `uv`). Ou 
 4. CORS já está liberado no `main.py` (`allow_origins=["*"]`)
 5. Abra o console do navegador (F12) para ver erros de rede ou de script
 
-### Erro de LLM (401/402/429)
-- Verifique `OPEN_ROUTER_KEY` no `.env`
-- Sem key válida → usa **mock automático** (logs mostram `[LLM] Usando classificação mock`)
-- Rate limit → fallback automático para mock
-
-### Erro `CERTIFICATE_VERIFY_FAILED` ao chamar a LLM
-Comum em redes corporativas com inspeção SSL (a CA da empresa não está no `certifi`). O backend já usa o repositório de certificados do sistema via `truststore`; confirme que ele está instalado (`uv sync`). Se persistir, defina `LLM_CA_BUNDLE` no `.env` com o `.pem` da CA da empresa. **Não** desative a verificação SSL.
+### Erro na StackSpot (401/403/429)
+- Confira `STACKSPOT_REALM`, `STACKSPOT_CLIENT_ID`, `STACKSPOT_CLIENT_SECRET` e `STACKSPOT_AGENT_URL` no ambiente autorizado.
+- Para `STACKSPOT_ENV_FILE`, confirme que o caminho relativo ao backend existe e que o processo tem permissão de leitura.
+- Verifique as permissões do agente, a conectividade e os limites de uso. Falhas não são convertidas em classificação simulada.
 
 ### Banco SQLite corrompido
 ```bash

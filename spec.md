@@ -1,23 +1,23 @@
 # Especificação Técnica de Desenvolvimento: FinGuard (Nível 1 - Classificador Inteligente)
 
 ## 1. Visão Geral e Objetivo do Negócio
-O **FinGuard** é uma solução para triagem inteligente de reclamações de clientes de uma instituição financeira. No **Nível 1 (Básico)**, o objetivo é construir uma aplicação web full-stack local e ágil que receba reclamações em texto livre (via chatbot individual ou importação em lote via CSV) e utilize um Provedor de LLM com RAG local para classificar e resumir os atendimentos, alimentando dinamicamente um Dashboard gerencial.
+O **FinGuard** é uma solução para triagem inteligente de reclamações de clientes de uma instituição financeira. No **Nível 1 (Básico)**, o objetivo é construir uma aplicação web full-stack local e ágil que receba reclamações em texto livre (via chatbot individual ou importação em lote via CSV) e utilize a StackSpot AI com a política interna local como contexto para classificar e resumir os atendimentos, alimentando dinamicamente um Dashboard gerencial.
 
 ### Escopo e Validações Obrigatórias do Desafio (4h)
 1. **Chatbot Interativo:** Receber texto livre e retornar análise estruturada imediata.
 2. **Processamento em Lote (CSV):** Suportar o dataset simulated de ~500 reclamações (`id`, `data_reclamacao`, `canal`, `texto_reclamacao`, `produto`, `status`).
 3. **Ofuscação de Palavras Impróprias:** Garantir a remoção/ofuscação de termos ofensivos no campo `resumo`.
 4. **Exportação de Resultados:** Permitir exportar dados processados em `.json`, `.csv` e um documento `.html` consolidado contendo gráficos.
-5. **Execução 100% Local:** Sem persistência de dados em buckets ou serviços em nuvem (ex: AWS S3).
+5. **Persistência Local:** Sem persistência de dados em buckets ou serviços em nuvem (ex: AWS S3). A inferência usa a API remota da StackSpot.
 
 ---
 
 ## 2. Stack Tecnológica e Requisitos Técnicos
 
 ### Backend
-* **Linguagem:** Python 3.11+
+* **Linguagem:** Python 3.12+
 * **Framework Web:** `FastAPI` (desempenho alto, tipagem com Pydantic e documentação automática Swagger)
-* **Integração LLM:** `boto3` (AWS Bedrock — modelos recomendados: *Amazon Nova Micro* ou *Claude 3.5 Haiku* por latência e custo) ou **SDK Iara**
+* **Integração LLM:** StackSpot AI via REST assíncrono (`httpx`) e OAuth2 client credentials.
 * **Manipulação de Dados:** `pandas` (para parsing de CSV/JSON)
 * **Persistência Local:** SQLite (via SQLAlchemy ou Peewee) ou arquivo JSON local *thread-safe*
 
@@ -87,18 +87,20 @@ class ReclamacaoAnalise(BaseModel):
 backend/
 ├── main.py              # Entrada FastAPI, CORS e rotas HTTP
 ├── schemas.py           # Definições Pydantic e Enums
-├── llm_service.py       # Integração Bedrock/Iara + Injeção de Contexto (RAG local)
+├── llm_service.py       # Integração StackSpot + injeção da política local
 ├── sanitizer.py         # Filtro para ofuscação de palavras impróprias
 ├── repository.py        # Camada de banco de dados local (SQLite / JSON)
 ├── exporter.py          # Gerador de relatórios (JSON, CSV, HTML com Chart.js)
-├── requirements.txt     # Dependências (fastapi, uvicorn, boto3, pandas, pydantic)
-└── politica_interna.txt # Documento de contexto para RAG local
+├── requirements.txt     # Dependências (fastapi, uvicorn, httpx, pandas, pydantic)
+└── politica_interna.txt # Documento local incluído no prompt
 ```
 
 ### Detalhamento dos Componentes
 
 1. **`llm_service.py` (Orquestração e Prompt):**
-   * Lê a `politica_interna.txt` localmente e injeta no prompt do sistema.
+    * Lê a `politica_interna.txt` localmente e inclui o conteúdo no prompt enviado ao agente StackSpot.
+    * Autentica via OAuth2, mantém o token em memória e o renova ao expirar ou após HTTP 401.
+    * Ativa o Knowledge Source da StackSpot; não realiza busca vetorial local nesta implementação.
    * Força resposta estritamente em formato JSON compatível com o schema `ReclamacaoAnalise`.
    * Inclui tratamento de exceção com 1 tentativa de retry caso o parsing de JSON falhe.
 
